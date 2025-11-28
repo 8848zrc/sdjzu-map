@@ -1,0 +1,566 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>山东建筑大学 - 活地图系统</title>
+    
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        window._AMapSecurityConfig = {
+            securityJsCode: '03f00903b92206db88e84beb1a5e5bf3', 
+        };
+    </script>
+    
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js" crossorigin="anonymous"></script>
+    <script src="https://webapi.amap.com/loader.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-min.js" crossorigin="anonymous"></script>
+    
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f0f2f5; }
+        #app { width: 100%; height: 100%; position: relative; }
+        #map-container { width: 100%; height: 100%; z-index: 1; }
+
+        /* 搜索组件 */
+        .search-container {
+            position: absolute; top: 20px; left: 20px; right: 20px; z-index: 100;
+            max-width: 600px; margin: 0 auto;
+        }
+        .search-bar {
+            display: flex; gap: 10px; background: white; padding: 5px; border-radius: 30px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        }
+        .search-bar input {
+            flex: 1; padding: 12px 20px; border: none; font-size: 15px; outline: none; background: transparent;
+        }
+        .search-bar button {
+            padding: 0 20px; background: #007bff; color: white; border: none; border-radius: 25px; 
+            cursor: pointer; font-weight: bold; transition: background 0.3s; white-space: nowrap; display: flex; align-items: center; justify-content: center;
+        }
+        
+        .search-suggestions {
+            background: white; margin-top: 10px; border-radius: 12px; max-height: 60vh; overflow-y: auto;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1); display: none;
+        }
+        .search-suggestions.show { display: block; }
+        .suggestion-item {
+            padding: 12px 20px; border-bottom: 1px solid #f0f0f0; cursor: pointer; display: flex; align-items: center;
+        }
+        .suggestion-item:active { background: #f8f9fa; }
+        .suggestion-icon { margin-right: 12px; color: #999; font-size: 18px; width: 24px; text-align: center; }
+        .suggestion-info { flex: 1; overflow: hidden; }
+        .suggestion-name { font-weight: 600; color: #333; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .suggestion-desc { font-size: 12px; color: #666; margin-top: 2px; }
+        .tag-source { font-size: 10px; padding: 1px 4px; border-radius: 3px; margin-right: 5px; }
+        .tag-cloud { background: #e3f2fd; color: #007bff; }
+        .tag-amap { background: #f3f3f3; color: #666; }
+
+        .locate-btn {
+            position: absolute; bottom: 140px; right: 20px; z-index: 99;
+            width: 45px; height: 45px; background: white; border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.2); display: flex; justify-content: center; align-items: center;
+            font-size: 20px; color: #333; cursor: pointer;
+        }
+
+        .action-bar {
+            position: absolute; bottom: 40px; right: 20px; z-index: 100;
+            display: flex; flex-direction: column; gap: 15px; align-items: flex-end;
+        }
+        .btn {
+            padding: 12px 24px; background: white; border: none; border-radius: 30px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2); cursor: pointer; font-weight: bold;
+            display: flex; align-items: center; justify-content: center; color: #333;
+        }
+        .btn.primary { background: #007bff; color: white; }
+
+        .modal-mask {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.6); z-index: 999;
+            display: flex; justify-content: center; align-items: center;
+            backdrop-filter: blur(2px);
+        }
+        .modal {
+            background: white; padding: 25px; border-radius: 16px; width: 85%; max-width: 360px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.2); animation: slideUp 0.3s ease;
+        }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        
+        .form-item { margin-bottom: 15px; }
+        .form-item label { display: block; margin-bottom: 8px; color: #555; font-size: 14px; font-weight: 500;}
+        .form-item input { width: 100%; padding: 10px; box-sizing: border-box; border: 1px solid #ddd; border-radius: 8px; }
+        
+        .modal-btns { display: flex; justify-content: space-between; gap: 15px; margin-top: 25px; }
+        .modal-btns button { flex: 1; padding: 10px; border-radius: 8px; border: none; cursor: pointer; font-weight: bold; }
+        .btn-cancel { background: #f5f5f5; color: #666; }
+        .btn-confirm { background: #007bff; color: white; }
+
+        .type-selector { display: flex; gap: 10px; margin-top: 5px; }
+        .type-option {
+            flex: 1; border: 2px solid #f0f0f0; border-radius: 10px; padding: 12px 5px;
+            text-align: center; cursor: pointer; transition: all 0.3s;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            color: #888; font-size: 12px; background: #fafafa;
+        }
+        .type-option.active { border-color: #007bff; background-color: #eef7ff; color: #007bff; font-weight: bold; }
+        .type-option.active i { color: #007bff; }
+        
+        .nav-info-panel {
+            position: absolute; bottom: 0; left: 0; width: 100%; background: white;
+            padding: 15px 20px; border-radius: 20px 20px 0 0; box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            z-index: 101; transform: translateY(100%); transition: transform 0.3s;
+        }
+        .nav-info-panel.show { transform: translateY(0); }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <div id="map-container"></div>
+
+    <!-- 搜索区域 -->
+    <div class="search-container">
+        <div class="search-bar">
+            <input v-model="searchText" placeholder="搜地点: 300人报告厅、北区..." @input="handleSearchInput">
+            <button v-if="searchText" @click="clearSearch" style="background:#999; padding:0; width:30px; height:30px; margin-right:5px; border-radius:50%; min-width:30px;">✕</button>
+            <button @click="doSearch"><i class="fas fa-search"></i></button>
+        </div>
+        
+        <div class="search-suggestions" :class="{ show: suggestions.length > 0 }">
+            <div class="suggestion-item" v-for="item in suggestions" :key="item.id || item.uid" @click="selectSuggestion(item)">
+                <div class="suggestion-icon">
+                    <i class="fas" :class="getIconClass(item.type)"></i>
+                </div>
+                <div class="suggestion-info">
+                    <div class="suggestion-name">
+                        <span class="tag-source" :class="item.isCloud ? 'tag-cloud' : 'tag-amap'">{{ item.isCloud ? '校内' : '高德' }}</span>
+                        {{ item.name }}
+                    </div>
+                    <div class="suggestion-desc">{{ item.address || item.type || '未知' }}</div>
+                </div>
+                <div style="color:#007bff"><i class="fas fa-location-arrow"></i></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 定位按钮 -->
+    <div class="locate-btn" @click="locateUser" title="回到我的位置">
+        <i class="fas fa-crosshairs"></i>
+    </div>
+
+    <!-- 导航面板 -->
+    <div class="nav-info-panel" :class="{ show: isNavigating }">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+            <div>
+                <h3 style="margin:0; font-size:16px;">正在导航前往: {{ navTargetName }}</h3>
+                <p style="margin:5px 0 0; color:#666; font-size:13px;">{{ navInfo }}</p>
+            </div>
+            <button @click="stopNavigation" style="background:#dc3545; color:white; border:none; padding:8px 15px; border-radius:20px;">退出</button>
+        </div>
+    </div>
+
+    <!-- 底部操作栏 -->
+    <div class="action-bar" v-if="!isNavigating">
+        <button v-if="!user.isLoggedIn" class="btn primary" @click="showLoginModal = true">
+            <i class="fas fa-user-graduate" style="margin-right:5px;"></i> 登录
+        </button>
+        <div v-else style="display: flex; flex-direction: column; align-items: flex-end;">
+            <button class="btn primary" @click="startAddMode" :style="isAddingMode ? 'background:#dc3545' : ''">
+                <i class="fas" :class="isAddingMode ? 'fa-times' : 'fa-plus'" style="margin-right:5px;"></i>
+                {{ isAddingMode ? '取消' : '添加地点' }}
+            </button>
+        </div>
+    </div>
+
+    <!-- 登录弹窗 -->
+    <div v-if="showLoginModal" class="modal-mask">
+        <div class="modal">
+            <h3>建大学生认证</h3>
+            <div class="form-item"><label>手机号</label><input v-model="loginForm.phone" type="tel"></div>
+            <div class="form-item"><label>验证码 (测试填1234)</label><input v-model="loginForm.code"></div>
+            <div class="form-item"><label>学号</label><input v-model="loginForm.sid" placeholder="2025..."></div>
+            <div class="modal-btns">
+                <button class="btn-cancel" @click="showLoginModal = false">取消</button>
+                <button class="btn-confirm" @click="handleLogin">认证</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 添加地点弹窗 -->
+    <div v-if="showAddModal" class="modal-mask">
+        <div class="modal">
+            <h3>标注新地点</h3>
+            <div class="form-item"><label>名称</label><input v-model="markerForm.name" placeholder="如: 300人报告厅"></div>
+            
+            <div class="form-item">
+                <label>分类</label>
+                <div class="type-selector">
+                    <label class="type-option" :class="{active: markerForm.type==='生活'}">
+                        <input type="radio" v-model="markerForm.type" value="生活" hidden><i class="fas fa-store"></i> 生活
+                    </label>
+                    <label class="type-option" :class="{active: markerForm.type==='教学'}">
+                        <input type="radio" v-model="markerForm.type" value="教学" hidden><i class="fas fa-graduation-cap"></i> 教学
+                    </label>
+                    <label class="type-option" :class="{active: markerForm.type==='景观'}">
+                        <input type="radio" v-model="markerForm.type" value="景观" hidden><i class="fas fa-tree"></i> 景观
+                    </label>
+                </div>
+            </div>
+            <div class="modal-btns">
+                <button class="btn-cancel" @click="showAddModal = false">取消</button>
+                <button class="btn-confirm" @click="submitMarker">提交</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const AMAP_KEY = '9be3a4a8f5d482a3922a312cd65a211f';
+    const LC_APP_ID = "ECKlruvoxNOQI6zyzg66t5h1-MdYXbMMI";
+    const LC_APP_KEY = "B85feGjLyAiFP1OGroH89zfQ";
+    const LC_SERVER_URL = "https://ecklruvo.api.lncldglobal.com";
+
+    // 校园多边形 (SearchInBounds)
+    const CAMPUS_PATH = [[117.186782,36.687682],[117.188353,36.683363],[117.190676,36.678518],[117.192827,36.672513],[117.187587,36.671103],[117.186199,36.675071],[117.187052,36.675218],[117.187166,36.675492],[117.187127,36.676156],[117.187423,36.676736],[117.187467,36.677393],[117.187284,36.677928],[117.186896,36.678561],[117.186085,36.678934],[117.185601,36.679378],[117.184550,36.679445],[117.179272,36.678990],[117.179052,36.680841],[117.179209,36.681261],[117.179083,36.682586],[117.180417,36.682583],[117.180407,36.686606],[117.180538,36.686644],[117.180546,36.687704]];
+
+    const { createApp, ref, reactive, onMounted, nextTick } = Vue;
+
+    createApp({
+        setup() {
+            // --- 核心状态 ---
+            const map = ref(null);
+            const AMapObj = ref(null);
+            const geolocation = ref(null);
+            const walking = ref(null);
+            const placeSearch = ref(null); 
+            
+            const allCloudMarkers = ref([]);
+            const suggestions = ref([]);
+            const searchText = ref("");
+            
+            const userLocation = ref(null);
+            const isNavigating = ref(false);
+            const navTargetName = ref("");
+            const navInfo = ref("");
+
+            const user = reactive({ isLoggedIn: false, studentId: "" });
+            // 移除 isAdmin
+
+            const showLoginModal = ref(false);
+            const showAddModal = ref(false);
+            const isAddingMode = ref(false);
+            // 移除 isEditMode, editingMarkerId
+
+            const loginForm = reactive({ phone: "", code: "", sid: "" });
+            const markerForm = reactive({ name: "", type: "生活" });
+            const tempPoint = reactive({ lng: 0, lat: 0 });
+
+            onMounted(() => {
+                if (typeof AV !== 'undefined') AV.init({ appId: LC_APP_ID, appKey: LC_APP_KEY, serverURL: LC_SERVER_URL });
+                checkLoginSession();
+                initMap();
+                
+                // 绑定全局函数 (移除 triggerEdit, triggerOverride)
+                window.triggerNavi = (lng, lat, name) => startNavigation([lng, lat], name);
+            });
+
+            const initMap = () => {
+                AMapLoader.load({
+                    key: AMAP_KEY,
+                    version: "2.0",
+                    plugins: ["AMap.Scale", "AMap.ToolBar", "AMap.Geolocation", "AMap.Walking", "AMap.GeometryUtil", "AMap.PlaceSearch"], 
+                }).then((AMap) => {
+                    AMapObj.value = AMap;
+                    
+                    map.value = new AMap.Map("map-container", {
+                        viewMode: "3D",
+                        zoom: 16,
+                        zooms: [15, 20], 
+                        center: [117.186, 36.678], 
+                        mask: [CAMPUS_PATH],
+                        resizeEnable: true,
+                        isHotspot: true 
+                    });
+                    
+                    map.value.addControl(new AMap.Scale());
+                    
+                    // 定位插件
+                    geolocation.value = new AMap.Geolocation({
+                        enableHighAccuracy: true, timeout: 10000, position: 'RB', offset: [10, 80], zoomToAccuracy: false, showMarker: true
+                    });
+                    map.value.addControl(geolocation.value);
+                    geolocation.value.getCurrentPosition((status, result) => {
+                        if(status === 'complete') userLocation.value = [result.position.lng, result.position.lat];
+                    });
+
+                    // 导航插件
+                    walking.value = new AMap.Walking({
+                        map: map.value,
+                        autoFitView: true
+                    });
+
+                    // 搜索插件
+                    placeSearch.value = new AMap.PlaceSearch({ pageSize: 10, pageIndex: 1, extensions: 'all' });
+
+                    // 限制拖拽范围
+                    const polygon = new AMap.Polygon({ path: CAMPUS_PATH });
+                    const bounds = polygon.getBounds();
+                    const sw = bounds.getSouthWest();
+                    const ne = bounds.getNorthEast();
+                    const expandedBounds = new AMap.Bounds(
+                        new AMap.LngLat(sw.lng - 0.02, sw.lat - 0.02),
+                        new AMap.LngLat(ne.lng + 0.02, ne.lat + 0.02)
+                    );
+                    map.value.setLimitBounds(expandedBounds);
+
+                    fetchMarkersFromCloud();
+
+                    // 监听热点点击
+                    map.value.on('hotspotclick', (result) => {
+                        const data = {
+                            id: result.id,
+                            name: result.name,
+                            type: '高德地点',
+                            address: '',
+                            position: [result.lnglat.lng, result.lnglat.lat],
+                            isCloud: false
+                        };
+                        openInfoWindow(data);
+                    });
+
+                    // 监听普通点击
+                    map.value.on('click', (e) => {
+                        if (isAddingMode.value) {
+                            const isInside = AMap.GeometryUtil.isPointInRing(e.lnglat, CAMPUS_PATH);
+                            if (!isInside) { alert("只能在校园内标注"); return; }
+                            tempPoint.lng = e.lnglat.getLng();
+                            tempPoint.lat = e.lnglat.getLat();
+                            markerForm.name = "";
+                            showAddModal.value = true;
+                            isAddingMode.value = false;
+                        } else {
+                            // 点击空白处，扩大搜索范围尝试获取POI
+                            placeSearch.value.searchNearBy('', e.lnglat, 50, (status, result) => {
+                                if (status === 'complete' && result.info === 'OK' && result.poiList.pois.length > 0) {
+                                    const poi = result.poiList.pois[0];
+                                    const data = {
+                                        id: poi.id,
+                                        name: poi.name,
+                                        type: poi.type,
+                                        address: poi.address,
+                                        position: [poi.location.lng, poi.location.lat],
+                                        isCloud: false
+                                    };
+                                    openInfoWindow(data);
+                                }
+                            });
+                        }
+                    });
+
+                }).catch(e => console.error(e));
+            };
+
+            const fetchMarkersFromCloud = async () => {
+                if (!AV) return;
+                const query = new AV.Query('CampusMarkers');
+                query.limit(1000);
+                try {
+                    const results = await query.find();
+                    allCloudMarkers.value = results.map(r => ({
+                        id: r.id,
+                        name: r.get('name'),
+                        type: r.get('type') || '其他',
+                        author: r.get('author'),
+                        position: [r.get('location').longitude, r.get('location').latitude],
+                        isCloud: true
+                    }));
+                    allCloudMarkers.value.forEach(m => renderMarker(m));
+                } catch(e) { console.error(e); }
+            };
+
+            const handleSearchInput = () => {
+                const kw = searchText.value.trim();
+                if (!kw) { suggestions.value = []; return; }
+                
+                const cloudMatches = allCloudMarkers.value.filter(m => m.name.includes(kw));
+                
+                const polygon = new AMapObj.value.Polygon({ path: CAMPUS_PATH });
+                placeSearch.value.searchInBounds(kw, polygon, (status, result) => {
+                    let amapMatches = [];
+                    if (status === 'complete' && result.info === 'OK') {
+                        amapMatches = result.poiList.pois.map(p => ({
+                            id: p.id,
+                            name: p.name,
+                            type: p.type,
+                            address: p.address,
+                            position: [p.location.lng, p.location.lat],
+                            isCloud: false 
+                        }));
+                    }
+                    suggestions.value = [...cloudMatches, ...amapMatches];
+                });
+            };
+
+            const selectSuggestion = (item) => {
+                searchText.value = item.name;
+                suggestions.value = [];
+                const targetPos = new AMapObj.value.LngLat(item.position[0], item.position[1]);
+                map.value.setZoomAndCenter(18, targetPos);
+                setTimeout(() => openInfoWindow(item), 300);
+            };
+
+            const startNavigation = (targetLngLat, targetName) => {
+                const startNav = (start) => {
+                    if(!walking.value) return;
+                    walking.value.clear();
+                    isNavigating.value = true;
+                    navTargetName.value = targetName;
+                    navInfo.value = "正在规划路线...";
+                    walking.value.search(start, targetLngLat, (status, result) => {
+                        if (status === 'complete') {
+                            const distance = result.routes[0].distance;
+                            const time = Math.ceil(distance / 60);
+                            navInfo.value = `全程 ${distance} 米，步行约 ${time} 分钟`;
+                        } else {
+                            navInfo.value = "无法规划路线，请确认起终点在道路附近";
+                        }
+                    });
+                };
+
+                if(userLocation.value) {
+                    startNav(userLocation.value);
+                } else {
+                    geolocation.value.getCurrentPosition((status, result) => {
+                        if(status==='complete') {
+                            userLocation.value = [result.position.lng, result.position.lat];
+                            startNav(userLocation.value);
+                        } else {
+                            alert("无法获取定位，请确保开启GPS");
+                        }
+                    });
+                }
+            };
+
+            const stopNavigation = () => {
+                if(walking.value) walking.value.clear();
+                isNavigating.value = false;
+                map.value.setZoomAndCenter(16, [117.186, 36.678]);
+            };
+
+            const renderMarker = (data) => {
+                if(!map.value) return;
+                let iconClass = 'fa-map-marker-alt';
+                let color = '#007bff';
+                if(data.type==='生活') { iconClass='fa-store'; color='#28a745'; }
+                if(data.type==='教学') { iconClass='fa-graduation-cap'; color='#17a2b8'; }
+                if(data.type==='景观') { iconClass='fa-tree'; color='#fd7e14'; }
+
+                const content = `<div style="font-size:24px; color:${color}; text-shadow: 2px 2px 4px rgba(0,0,0,0.3);"><i class="fas ${iconClass}"></i></div>`;
+                const marker = new AMapObj.value.Marker({
+                    position: new AMapObj.value.LngLat(data.position[0], data.position[1]),
+                    content: content,
+                    offset: new AMapObj.value.Pixel(-10, -24)
+                });
+                marker.on('click', () => openInfoWindow(data));
+                map.value.add(marker);
+            };
+
+            const openInfoWindow = (data) => {
+                const isCloud = data.isCloud;
+                // 移除管理员按钮逻辑
+
+                const infoContent = `
+                    <div style="padding:5px; min-width:220px;">
+                        <h4 style="margin:0 0 5px 0; font-size:16px;">${data.name}</h4>
+                        <div style="font-size:12px; color:#666; margin-bottom:10px;">
+                            ${isCloud ? `<span style="background:#e3f2fd; color:#007bff; padding:1px 4px; border-radius:3px;">校内标注</span>` : `<span style="background:#f3f3f3; padding:1px 4px; border-radius:3px;">高德原生</span>`}
+                            ${isCloud ? '贡献者: ' + data.author : ''}
+                        </div>
+                        <button onclick="window.triggerNavi(${data.position[0]}, ${data.position[1]}, '${data.name}')" 
+                            style="width:100%; background:#007bff; color:white; border:none; padding:8px; border-radius:4px; cursor:pointer;">
+                            <i class="fas fa-location-arrow"></i> 到这去 (导航)
+                        </button>
+                    </div>
+                `;
+                const infoWindow = new AMapObj.value.InfoWindow({
+                    content: infoContent,
+                    offset: new AMapObj.value.Pixel(0, -30)
+                });
+                infoWindow.open(map.value, data.position);
+            };
+
+            const submitMarker = async () => {
+                if (!markerForm.name) return;
+                
+                try {
+                    // 只保留新增逻辑
+                    const MarkerClass = AV.Object.extend('CampusMarkers');
+                    const newMarker = new MarkerClass();
+                    newMarker.set('name', markerForm.name);
+                    newMarker.set('type', markerForm.type);
+                    newMarker.set('author', user.studentId);
+                    newMarker.set('location', new AV.GeoPoint(tempPoint.lat, tempPoint.lng));
+                    await newMarker.save();
+                    alert("发布成功！");
+                    location.reload();
+                } catch(e) { alert("操作失败: " + e.message); }
+                showAddModal.value = false;
+            };
+
+            // --- 登录与辅助 ---
+            const validateAccount = (sid) => {
+                // 移除 admin 后门
+                const year = parseInt(sid.substring(0,4));
+                const now = new Date().getFullYear();
+                if(now - year > 5) return {valid:false, msg:"账号已过期"};
+                return {valid:true};
+            };
+            
+            const handleLogin = () => {
+                if(loginForm.code!=="1234") { alert("验证码错误"); return; }
+                const check = validateAccount(loginForm.sid);
+                if(!check.valid) { alert(check.msg); return; }
+                user.isLoggedIn = true;
+                user.studentId = loginForm.sid;
+                localStorage.setItem("user_session", JSON.stringify(user));
+                showLoginModal.value = false;
+            };
+
+            const checkLoginSession = () => {
+                const s = localStorage.getItem("user_session");
+                if(s) {
+                    const u = JSON.parse(s);
+                    if(validateAccount(u.studentId).valid) {
+                        user.isLoggedIn = true;
+                        user.studentId = u.studentId;
+                    }
+                }
+            };
+            
+            const startAddMode = () => { isAddingMode.value = !isAddingMode.value; };
+            const locateUser = () => {
+                if(geolocation.value) geolocation.value.getCurrentPosition((status,res)=>{
+                    if(status==='complete') map.value.setZoomAndCenter(17, res.position);
+                    else alert('定位失败');
+                });
+            };
+            const clearSearch = () => { searchText.value = ""; suggestions.value = []; if(isNavigating.value) stopNavigation(); };
+            const getIconClass = (type) => {
+                if(type==='生活') return 'fa-store';
+                if(type==='教学') return 'fa-graduation-cap';
+                return 'fa-tree';
+            };
+
+            return {
+                map, searchText, suggestions, user, showLoginModal, showAddModal, isAddingMode, 
+                loginForm, markerForm, isNavigating, navTargetName, navInfo, 
+                handleSearchInput, selectSuggestion, clearSearch, doSearch: ()=>{}, 
+                locateUser, stopNavigation, startAddMode, submitMarker, handleLogin,
+                getIconClass
+            };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>

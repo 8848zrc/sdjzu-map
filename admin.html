@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>建大活地图 - 管理控制台</title>
+    <script src="https://cdn.jsdelivr.net/npm/vue@3.3.4/dist/vue.global.prod.js" crossorigin="anonymous"></script>
+    <script src="https://webapi.amap.com/loader.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/leancloud-storage@4.15.0/dist/av-min.js" crossorigin="anonymous"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        window._AMapSecurityConfig = { securityJsCode: '03f00903b92206db88e84beb1a5e5bf3' };
+    </script>
+
+    <style>
+        /* --- 布局样式 --- */
+        body, html { margin: 0; padding: 0; height: 100%; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #app { display: flex; height: 100%; }
+        
+        /* 左侧侧边栏 */
+        .sidebar {
+            width: 350px; background: white; border-right: 1px solid #e0e0e0; 
+            display: flex; flex-direction: column; z-index: 10; box-shadow: 2px 0 5px rgba(0,0,0,0.05);
+        }
+        .sidebar-header {
+            padding: 15px; background: #f8f9fa; border-bottom: 1px solid #eee;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .sidebar-tabs { display: flex; border-bottom: 1px solid #ddd; }
+        .tab { 
+            flex: 1; text-align: center; padding: 10px; cursor: pointer; background: #f1f1f1; font-size: 13px;
+        }
+        .tab.active { background: white; font-weight: bold; border-bottom: 2px solid #007bff; color: #007bff; }
+        
+        .list-container { flex: 1; overflow-y: auto; padding: 10px; }
+        
+        /* 列表项 */
+        .list-item {
+            padding: 12px; border: 1px solid #eee; margin-bottom: 8px; border-radius: 6px; cursor: pointer;
+            transition: all 0.2s; position: relative;
+        }
+        .list-item:hover { background: #f8f9fa; border-color: #cce5ff; }
+        .list-item.active { background: #e7f1ff; border-color: #007bff; }
+        .item-title { font-weight: bold; font-size: 14px; margin-bottom: 4px; display: flex; justify-content: space-between; }
+        .item-meta { font-size: 12px; color: #666; display: flex; gap: 8px; }
+        .tag { padding: 1px 4px; border-radius: 3px; font-size: 10px; }
+        .tag.生活 { background: #d4edda; color: #155724; }
+        .tag.教学 { background: #d1ecf1; color: #0c5460; }
+        .tag.景观 { background: #fff3cd; color: #856404; }
+        .tag-admin { background: #ffc107; color: black; font-weight: bold; }
+
+        /* 右侧地图区 */
+        .main-content { flex: 1; position: relative; }
+        #map-container { width: 100%; height: 100%; }
+        
+        /* 地图上的操作面板 */
+        .editor-panel {
+            position: absolute; top: 20px; right: 20px; width: 300px; background: white;
+            padding: 20px; border-radius: 8px; box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 100; display: none;
+        }
+        .editor-panel.show { display: block; }
+        .editor-header { font-weight: bold; margin-bottom: 15px; font-size: 16px; border-bottom: 1px solid #eee; padding-bottom: 10px;}
+        
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+        
+        .action-btns { display: flex; gap: 10px; margin-top: 15px; }
+        .btn { flex: 1; padding: 8px; border: none; border-radius: 4px; cursor: pointer; color: white; font-size: 13px; }
+        .btn-save { background: #28a745; }
+        .btn-del { background: #dc3545; }
+        .btn-cancel { background: #6c757d; }
+
+        /* 搜索高德POI输入框 */
+        .poi-search { padding: 10px; background: #fff; border-bottom: 1px solid #eee; }
+        .poi-search input { width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+
+        /* 登录遮罩 */
+        .login-mask {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #f4f6f8;
+            z-index: 999; display: flex; justify-content: center; align-items: center;
+        }
+        .login-box { background: white; padding: 40px; border-radius: 10px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); text-align: center; }
+        .login-box input { padding: 10px; margin: 10px 0; width: 200px; display: block; }
+    </style>
+</head>
+<body>
+
+<div id="app">
+    <!-- 登录界面 -->
+    <div v-if="!isAdmin" class="login-mask">
+        <div class="login-box">
+            <h2 style="margin-top:0; color:#007bff;"><i class="fas fa-shield-alt"></i> 管理员后台</h2>
+            <input type="password" v-model="password" placeholder="请输入管理员密码" @keyup.enter="login">
+            <button @click="login" class="btn btn-save" style="width:100%">登录系统</button>
+            <p style="color:red; font-size:12px; height:20px;">{{ errorMsg }}</p>
+        </div>
+    </div>
+
+    <!-- 主界面 -->
+    <div v-else style="display:flex; width:100%; height:100%;">
+        <!-- 侧边栏 -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <strong><i class="fas fa-database"></i> 数据管理</strong>
+                <button @click="logout" style="border:none; background:none; color:#dc3545; cursor:pointer;">退出</button>
+            </div>
+            
+            <div class="sidebar-tabs">
+                <div class="tab" :class="{active: currentTab==='list'}" @click="currentTab='list'">校内标注 ({{ markers.length }})</div>
+                <div class="tab" :class="{active: currentTab==='search'}" @click="currentTab='search'">修改高德原生</div>
+            </div>
+
+            <!-- Tab 1: 校内数据列表 -->
+            <div v-if="currentTab==='list'" class="list-container">
+                <div class="list-item" v-for="m in markers" :key="m.id" 
+                     :class="{active: selectedMarker && selectedMarker.id === m.id}"
+                     @click="focusMarker(m)">
+                    <div class="item-title">
+                        {{ m.name }}
+                        <span v-if="m.author==='admin'" class="tag tag-admin">官方</span>
+                    </div>
+                    <div class="item-meta">
+                        <span class="tag" :class="m.type">{{ m.type }}</span>
+                        <span>{{ m.author }}</span>
+                        <span>{{ formatDate(m.createdAt) }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tab 2: 高德搜索列表 -->
+            <div v-if="currentTab==='search'" class="list-container">
+                <div class="poi-search">
+                    <input v-model="poiKeyword" placeholder="搜食堂、楼宇..." @keyup.enter="searchPOI">
+                    <button @click="searchPOI" style="margin-top:5px; width:100%; padding:5px; cursor:pointer;">搜索原生地点</button>
+                </div>
+                <div class="list-item" v-for="p in poiResults" :key="p.id" @click="selectPOI(p)">
+                    <div class="item-title">{{ p.name }}</div>
+                    <div class="item-meta">{{ p.address }}</div>
+                    <div style="font-size:10px; color:#007bff; margin-top:4px;">点击覆盖/修改此名称</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧地图 -->
+        <div class="main-content">
+            <div id="map-container"></div>
+            
+            <!-- 编辑面板 (悬浮) -->
+            <div class="editor-panel" :class="{show: !!selectedMarker || !!editingPOI}">
+                <div class="editor-header">
+                    {{ editingPOI ? '新建覆盖标注' : '编辑地点信息' }}
+                    <span v-if="selectedMarker && selectedMarker.author!=='admin'" style="font-size:12px; color:#dc3545; display:block; margin-top:5px;">⚠️ 用户提交数据，请审核</span>
+                </div>
+                
+                <div class="form-group">
+                    <label>地点名称</label>
+                    <input v-model="editForm.name">
+                </div>
+                <div class="form-group">
+                    <label>分类</label>
+                    <select v-model="editForm.type">
+                        <option value="生活">生活服务</option>
+                        <option value="教学">教学科研</option>
+                        <option value="景观">校园景观</option>
+                    </select>
+                </div>
+                <div class="form-group" v-if="selectedMarker">
+                    <label>坐标 (拖动地图标记修改)</label>
+                    <input :value="editForm.position.join(', ')" disabled style="background:#eee;">
+                </div>
+
+                <div class="action-btns">
+                    <button class="btn btn-save" @click="saveChanges">保存 / 通过</button>
+                    <button class="btn btn-del" v-if="selectedMarker" @click="deleteCurrent">删除</button>
+                    <button class="btn btn-cancel" @click="cancelEdit">取消</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    const { createApp, ref, reactive, onMounted, watch } = Vue;
+    const AMAP_KEY = '9be3a4a8f5d482a3922a312cd65a211f';
+    const LC_APP_ID = "ECKlruvoxNOQI6zyzg66t5h1-MdYXbMMI";
+    const LC_APP_KEY = "B85feGjLyAiFP1OGroH89zfQ";
+    const LC_SERVER_URL = "https://ecklruvo.api.lncldglobal.com";
+
+    // 校园中心
+    const CAMPUS_CENTER = [117.186, 36.678];
+
+    createApp({
+        setup() {
+            const isAdmin = ref(false);
+            const password = ref("");
+            const errorMsg = ref("");
+            const currentTab = ref("list"); // list | search
+            
+            const markers = ref([]);
+            const map = ref(null);
+            const AMapObj = ref(null);
+            const placeSearch = ref(null);
+            const mapMarkers = ref([]); // 地图上的Marker实例集合
+            const tempMarker = ref(null); // 正在编辑/选中的Marker实例
+
+            const poiKeyword = ref("");
+            const poiResults = ref([]);
+            const editingPOI = ref(null); // 正在把某个POI转为标注
+
+            const selectedMarker = ref(null); // 当前选中的数据库记录
+            const editForm = reactive({ name: "", type: "生活", position: [] });
+
+            onMounted(() => {
+                if(typeof AV !== 'undefined') AV.init({ appId: LC_APP_ID, appKey: LC_APP_KEY, serverURL: LC_SERVER_URL });
+                if (localStorage.getItem('admin_token') === 'true') {
+                    isAdmin.value = true;
+                    initMap();
+                }
+            });
+
+            const login = () => {
+                if (password.value === "3838438") { 
+                    isAdmin.value = true;
+                    localStorage.setItem('admin_token', 'true');
+                    initMap();
+                } else {
+                    errorMsg.value = "密码错误";
+                }
+            };
+
+            const logout = () => {
+                localStorage.removeItem('admin_token');
+                location.reload();
+            };
+
+            const initMap = () => {
+                AMapLoader.load({
+                    key: AMAP_KEY,
+                    version: "2.0",
+                    plugins: ["AMap.PlaceSearch", "AMap.Scale", "AMap.ToolBar"], 
+                }).then((AMap) => {
+                    AMapObj.value = AMap;
+                    map.value = new AMap.Map("map-container", {
+                        viewMode: "3D", zoom: 16, center: CAMPUS_CENTER, resizeEnable: true
+                    });
+                    map.value.addControl(new AMap.Scale());
+                    map.value.addControl(new AMap.ToolBar());
+
+                    placeSearch.value = new AMap.PlaceSearch({ pageSize: 10, pageIndex: 1, city: '0531' });
+
+                    fetchData(); // 加载数据
+                });
+            };
+
+            // --- 数据加载与显示 ---
+            const fetchData = async () => {
+                const query = new AV.Query('CampusMarkers');
+                query.descending('createdAt');
+                query.limit(500);
+                const results = await query.find();
+                markers.value = results.map(r => ({
+                    id: r.id,
+                    ...r.toJSON(),
+                    position: [r.get('location').longitude, r.get('location').latitude]
+                }));
+                renderAllMarkers();
+            };
+
+            const renderAllMarkers = () => {
+                if(!map.value) return;
+                // 清除旧点
+                map.value.remove(mapMarkers.value);
+                mapMarkers.value = [];
+
+                markers.value.forEach(m => {
+                    const marker = new AMapObj.value.Marker({
+                        position: m.position,
+                        title: m.name,
+                        map: map.value,
+                        // 不同颜色区分管理员和用户
+                        content: `<div style="color:${m.author==='admin'?'#ffc107':'#007bff'}; font-size:24px;"><i class="fas fa-map-marker-alt"></i></div>`
+                    });
+                    marker.extData = m; // 绑定数据
+                    marker.on('click', () => focusMarker(m));
+                    mapMarkers.value.push(marker);
+                });
+            };
+
+            // --- 列表/地图交互 ---
+            const focusMarker = (item) => {
+                selectedMarker.value = item;
+                editingPOI.value = null; // 清除POI模式
+                
+                // 填充表单
+                editForm.name = item.name;
+                editForm.type = item.type;
+                editForm.position = item.position;
+
+                // 地图操作
+                map.value.setZoomAndCenter(18, item.position);
+                
+                // 创建一个可拖拽的编辑Marker
+                if(tempMarker.value) map.value.remove(tempMarker.value);
+                tempMarker.value = new AMapObj.value.Marker({
+                    position: item.position,
+                    draggable: true,
+                    cursor: 'move',
+                    map: map.value,
+                    icon: 'https://webapi.amap.com/theme/v1.3/markers/n/mark_r.png' // 红色编辑点
+                });
+                
+                // 监听拖拽，更新坐标
+                tempMarker.value.on('dragend', (e) => {
+                    editForm.position = [e.lnglat.lng, e.lnglat.lat];
+                });
+            };
+
+            // --- 搜索原生POI ---
+            const searchPOI = () => {
+                if(!poiKeyword.value) return;
+                placeSearch.value.search(poiKeyword.value, (status, result) => {
+                    if (status === 'complete' && result.info === 'OK') {
+                        poiResults.value = result.poiList.pois;
+                    }
+                });
+            };
+
+            const selectPOI = (poi) => {
+                selectedMarker.value = null; // 清除普通编辑模式
+                editingPOI.value = poi;
+                
+                // 准备新建数据
+                editForm.name = poi.name; // 默认用原名，管理员可改
+                editForm.type = '生活';
+                editForm.position = [poi.location.lng, poi.location.lat];
+
+                map.value.setZoomAndCenter(18, editForm.position);
+                
+                if(tempMarker.value) map.value.remove(tempMarker.value);
+                tempMarker.value = new AMapObj.value.Marker({
+                    position: editForm.position,
+                    map: map.value,
+                    animation: 'AMAP_ANIMATION_DROP'
+                });
+            };
+
+            // --- 保存/删除逻辑 ---
+            const saveChanges = async () => {
+                if(!editForm.name) return;
+                
+                try {
+                    if (selectedMarker.value) {
+                        // 更新现有
+                        const todo = AV.Object.createWithoutData('CampusMarkers', selectedMarker.value.id);
+                        todo.set('name', editForm.name);
+                        todo.set('type', editForm.type);
+                        todo.set('location', new AV.GeoPoint(editForm.position[1], editForm.position[0]));
+                        // 如果管理员审核/修改了用户的点，可以把作者改为 admin 或者加个 verified 字段，这里简单处理
+                        await todo.save();
+                        alert("更新成功");
+                    } else if (editingPOI.value) {
+                        // 新增覆盖 (本质是新建一个点)
+                        const MarkerClass = AV.Object.extend('CampusMarkers');
+                        const newMarker = new MarkerClass();
+                        newMarker.set('name', editForm.name);
+                        newMarker.set('type', editForm.type);
+                        newMarker.set('author', 'admin'); // 标记为管理员创建
+                        newMarker.set('location', new AV.GeoPoint(editForm.position[1], editForm.position[0]));
+                        await newMarker.save();
+                        alert("已覆盖原生地点");
+                    }
+                    
+                    cancelEdit();
+                    fetchData(); // 刷新列表
+                } catch(e) {
+                    alert("保存失败: " + e.message);
+                }
+            };
+
+            const deleteCurrent = async () => {
+                if(!confirm("确定删除吗？")) return;
+                try {
+                    const todo = AV.Object.createWithoutData('CampusMarkers', selectedMarker.value.id);
+                    await todo.destroy();
+                    alert("删除成功");
+                    cancelEdit();
+                    fetchData();
+                } catch(e) { alert(e.message); }
+            };
+
+            const cancelEdit = () => {
+                selectedMarker.value = null;
+                editingPOI.value = null;
+                if(tempMarker.value) map.value.remove(tempMarker.value);
+                tempMarker.value = null;
+            };
+
+            const formatDate = (iso) => {
+                const d = new Date(iso);
+                return `${d.getMonth()+1}/${d.getDate()} ${d.getHours()}:${d.getMinutes()}`;
+            };
+
+            return {
+                isAdmin, password, errorMsg, login, logout, currentTab,
+                markers, poiKeyword, poiResults, searchPOI, selectPOI,
+                focusMarker, selectedMarker, editingPOI, editForm,
+                saveChanges, deleteCurrent, cancelEdit, formatDate
+            };
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
